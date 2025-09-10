@@ -377,6 +377,24 @@ export class QdrantDBService {
     }
   }
 
+  // Generate direct AI response without database lookup
+  async getDirectAIResponse(question: string, assistantType: string = 'general'): Promise<string> {
+    try {
+      // Load assistant-specific prompt instructions
+      const assistantInstructions = await this.loadAssistantPrompt(assistantType);
+
+      const prompt = `${assistantInstructions}
+Question: ${question}
+Provide your response in a natural, conversational way suitable for a phone conversation.`;
+
+      const response = await this.aiProvider.invoke(prompt);
+      return response.content;
+    } catch (error) {
+      this.logger.error('Error in direct AI response:', error);
+      throw error;
+    }
+  }
+
   // Add document with embedding to Qdrant collection
   async addToExistingCollection(collectionName: string, document: QdrantDocument): Promise<void> {
     try {

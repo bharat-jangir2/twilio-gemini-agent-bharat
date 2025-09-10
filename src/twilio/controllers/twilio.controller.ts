@@ -65,7 +65,7 @@ export class TwilioController {
     return { callSid: result.callSid, status: result.status, message: 'Call status updated successfully' };
   }
 
-  // Get answer for a question using the same RAG process as voice calls
+  // Get answer for a question using direct AI response (bypassing database)
   @Post('question')
   @HttpCode(HttpStatus.OK)
   async getAnswerApi(@Body() questionDto: QuestionDto): Promise<any> {
@@ -77,58 +77,74 @@ export class TwilioController {
     const sessionId = questionDto.sessionId || `api-${Date.now()}`;
     const phoneNumber = questionDto.phoneNumber || 'api-call';
 
+    // COMMENTED OUT: Database-based RAG process
     // Create or get conversation session
-    const session = this.qdrantDBService['conversationLogger'].getOrCreateSession(sessionId, assistantType, phoneNumber);
+    // const session = this.qdrantDBService['conversationLogger'].getOrCreateSession(sessionId, assistantType, phoneNumber);
 
     // Create interaction for this Q&A
-    const interaction = this.qdrantDBService['conversationLogger'].createInteraction(questionDto.question, false);
+    // const interaction = this.qdrantDBService['conversationLogger'].createInteraction(questionDto.question, false);
 
     try {
+      // COMMENTED OUT: Redis lookup
       // First, try to get answer from Redis (same as voice interaction)
-      const redisAnswer = await this.redisService.getAnswerFromRedis(questionDto.question, assistantType);
-      if (redisAnswer) {
-        // Update interaction with Redis response
-        this.qdrantDBService['conversationLogger'].updateAnswer(interaction, redisAnswer);
-        this.qdrantDBService['conversationLogger'].updateSourceRedis(interaction);
+      // const redisAnswer = await this.redisService.getAnswerFromRedis(questionDto.question, assistantType);
+      // if (redisAnswer) {
+      //   // Update interaction with Redis response
+      //   this.qdrantDBService['conversationLogger'].updateAnswer(interaction, redisAnswer);
+      //   this.qdrantDBService['conversationLogger'].updateSourceRedis(interaction);
 
-        // Add interaction to session
-        await this.qdrantDBService['conversationLogger'].addInteraction(session.sessionId, interaction);
+      //   // Add interaction to session
+      //   await this.qdrantDBService['conversationLogger'].addInteraction(session.sessionId, interaction);
 
-        return {
-          sessionId,
-          question: questionDto.question,
-          correction: interaction.correction,
-          source: interaction.source,
-          answer: redisAnswer,
-          timestamp: interaction.timestamp,
-        };
-      }
+      //   return {
+      //     sessionId,
+      //     question: questionDto.question,
+      //     correction: interaction.correction,
+      //     source: interaction.source,
+      //     answer: redisAnswer,
+      //     timestamp: interaction.timestamp,
+      //   };
+      // }
 
+      // COMMENTED OUT: Qdrant RAG process
       // If Redis doesn't have the answer, use Qdrant RAG (same as voice interaction)
-      const answer = await this.qdrantDBService.getAnswerUsingQdrantRAG(
-        questionDto.question,
-        assistantType,
-        sessionId,
-        undefined, // confidence
-        phoneNumber,
-      );
+      // const answer = await this.qdrantDBService.getAnswerUsingQdrantRAG(
+      //   questionDto.question,
+      //   assistantType,
+      //   sessionId,
+      //   undefined, // confidence
+      //   phoneNumber,
+      // );
 
       // Get the updated interaction data
-      const updatedSession = await this.qdrantDBService['conversationLogger'].getSession(sessionId);
-      const lastInteraction = updatedSession?.interactions[updatedSession.interactions.length - 1];
+      // const updatedSession = await this.qdrantDBService['conversationLogger'].getSession(sessionId);
+      // const lastInteraction = updatedSession?.interactions[updatedSession.interactions.length - 1];
+
+      // return {
+      //   sessionId,
+      //   question: questionDto.question,
+      //   correction: lastInteraction?.correction,
+      //   source: lastInteraction?.source,
+      //   answer,
+      //   timestamp: lastInteraction?.timestamp,
+      // };
+
+      // NEW: Direct AI response using QdrantDBService's AI provider
+      const answer = await this.qdrantDBService.getDirectAIResponse(questionDto.question, assistantType);
 
       return {
         sessionId,
         question: questionDto.question,
-        correction: lastInteraction?.correction,
-        source: lastInteraction?.source,
         answer,
-        timestamp: lastInteraction?.timestamp,
+        source: 'direct-ai',
+        timestamp: new Date().toISOString(),
+        note: 'Response generated directly from AI without database lookup',
       };
     } catch (error) {
+      // COMMENTED OUT: Database error handling
       // Update error in interaction
-      this.qdrantDBService['conversationLogger'].updateError(interaction, error.message);
-      throw error;
+      // this.qdrantDBService['conversationLogger'].updateError(interaction, error.message);
+      throw new BadRequestException(`Failed to generate AI response: ${error.message}`);
     }
   }
 }
