@@ -40,77 +40,90 @@ export class AIResponseService {
     const sessionId = callSid || 'unknown';
     const hasCorrections = originalTranscription && originalTranscription !== correctedTranscription;
 
+    // COMMENTED OUT: Database-based RAG process
     // Create or get conversation session
-    const session = this.conversationLogger.getOrCreateSession(sessionId, assistantType, phoneNumber);
-    
+    // const session = this.conversationLogger.getOrCreateSession(sessionId, assistantType, phoneNumber);
+
     // Create interaction for this Q&A
-    const interaction = this.conversationLogger.createInteraction(correctedTranscription, !!hasCorrections);
+    // const interaction = this.conversationLogger.createInteraction(correctedTranscription, !!hasCorrections);
 
     try {
-      const redisAnswer = await this.redisService.getAnswerFromRedis(correctedTranscription, assistantType);
-      if (redisAnswer) {
-        // Update interaction with Redis response
-        this.conversationLogger.updateAnswer(interaction, redisAnswer);
-        this.conversationLogger.updateSourceRedis(interaction);
-        
-        // Add interaction to session
-        await this.conversationLogger.addInteraction(session.sessionId, interaction);
-        
-        return redisAnswer;
-      }
+      // COMMENTED OUT: Redis lookup
+      // const redisAnswer = await this.redisService.getAnswerFromRedis(correctedTranscription, assistantType);
+      // if (redisAnswer) {
+      //   // Update interaction with Redis response
+      //   this.conversationLogger.updateAnswer(interaction, redisAnswer);
+      //   this.conversationLogger.updateSourceRedis(interaction);
 
+      //   // Add interaction to session
+      //   await this.conversationLogger.addInteraction(session.sessionId, interaction);
+
+      //   return redisAnswer;
+      // }
+
+      // COMMENTED OUT: Vector database RAG process
       // Check which vector database to use based on environment variable
-      const vectorDatabase = this.configService.get<string>('VECTOR_DATABASE') || 'chroma';
+      // const vectorDatabase = this.configService.get<string>('VECTOR_DATABASE') || 'chroma';
 
-      this.logger.verbose(`
-        ✅ Using RAG approach with ${vectorDatabase.toUpperCase()}
-        ${hasCorrections ? '❌' : '✅'} hasCorrections: ${hasCorrections}
-      `);
+      // this.logger.verbose(`
+      //   ✅ Using RAG approach with ${vectorDatabase.toUpperCase()}
+      //   ${hasCorrections ? '❌' : '✅'} hasCorrections: ${hasCorrections}
+      // `);
 
-      let responseText: string;
+      // let responseText: string;
 
-      if (vectorDatabase.toLowerCase() === 'qdrant') {
-        // Use Qdrant RAG approach
-        responseText = await this.qdrantDBService.getAnswerUsingQdrantRAG(
-          correctedTranscription,
-          assistantType,
-          sessionId,
-          0.95,
-          phoneNumber,
-        );
-      } else {
-        // Use ChromaDB RAG approach (default)
-        responseText = await this.chromaDBService.getAnswerUsingChromaRAG(
-          correctedTranscription,
-          assistantType,
-          sessionId,
-          0.95,
-          phoneNumber,
-        );
-      }
+      // if (vectorDatabase.toLowerCase() === 'qdrant') {
+      //   // Use Qdrant RAG approach
+      //   responseText = await this.qdrantDBService.getAnswerUsingQdrantRAG(
+      //     correctedTranscription,
+      //     assistantType,
+      //     sessionId,
+      //     0.95,
+      //     phoneNumber,
+      //   );
+      // } else {
+      //   // Use ChromaDB RAG approach (default)
+      //   responseText = await this.chromaDBService.getAnswerUsingChromaRAG(
+      //     correctedTranscription,
+      //     assistantType,
+      //     sessionId,
+      //     0.95,
+      //     phoneNumber,
+      //   );
+      // }
 
-      if (responseText) {
-        return responseText;
-      }
+      // if (responseText) {
+      //   return responseText;
+      // }
+
+      // NEW: Direct AI response using QdrantDBService's direct method
+      const responseText = await this.qdrantDBService.getDirectAIResponse(correctedTranscription, assistantType);
+
+      return responseText;
     } catch (error) {
-      const vectorDatabase = this.configService.get<string>('VECTOR_DATABASE') || 'chroma';
-      this.logger.error(`${vectorDatabase.toUpperCase()} RAG approach failed:`, error);
-      
+      // COMMENTED OUT: Database error handling
+      // const vectorDatabase = this.configService.get<string>('VECTOR_DATABASE') || 'chroma';
+      // this.logger.error(`${vectorDatabase.toUpperCase()} RAG approach failed:`, error);
+
       // Update error in interaction
-      this.conversationLogger.updateError(interaction, error.message);
+      // this.conversationLogger.updateError(interaction, error.message);
+
+      this.logger.error('Direct AI response failed:', error);
+      throw error;
     }
 
-    this.logger.log('Falling back to existing RAG approach');
-    const fallbackResponse = await this.openAIAssistantService.getAnswer(correctedTranscription, threadId);
-    
+    // COMMENTED OUT: Fallback to OpenAI Assistant
+    // this.logger.log('Falling back to existing RAG approach');
+    // const fallbackResponse = await this.openAIAssistantService.getAnswer(correctedTranscription, threadId);
+
     // Update interaction with fallback response
-    this.conversationLogger.updateAnswer(interaction, fallbackResponse);
-    this.conversationLogger.updateSourceNoContext(interaction);
-    
+    // this.conversationLogger.updateAnswer(interaction, fallbackResponse);
+    // this.conversationLogger.updateSourceNoContext(interaction);
+
     // Add interaction to session
-    await this.conversationLogger.addInteraction(session.sessionId, interaction);
-    
-    return fallbackResponse;
+    // await this.conversationLogger.addInteraction(session.sessionId, interaction);
+
+    // return fallbackResponse;
   }
 
   private getCorrections(originalText: string, correctedText: string): string[] {

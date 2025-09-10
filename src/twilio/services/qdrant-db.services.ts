@@ -383,15 +383,51 @@ export class QdrantDBService {
       // Load assistant-specific prompt instructions
       const assistantInstructions = await this.loadAssistantPrompt(assistantType);
 
+      // For general assistant, check if question matches data.json
+      if (assistantType === 'general') {
+        const dataAnswer = await this.getAnswerFromData(question, assistantType);
+        if (dataAnswer) {
+          return dataAnswer;
+        }
+      }
+
+      // If no data match found, use AI with instructions
       const prompt = `${assistantInstructions}
 Question: ${question}
-Provide your response in a natural, conversational way suitable for a phone conversation.`;
+IMPORTANT: This question is not in your predefined knowledge base. You should respond naturally saying that you don't have specific information about this topic in your knowledge base, but you're happy to help with other questions that are available. Do NOT use your general knowledge to answer this question. Provide your response in a natural, conversational way suitable for a phone conversation.`;
 
       const response = await this.aiProvider.invoke(prompt);
       return response.content;
     } catch (error) {
       this.logger.error('Error in direct AI response:', error);
       throw error;
+    }
+  }
+
+  // Check if question matches data.json and return exact answer
+  private async getAnswerFromData(question: string, assistantType: string): Promise<string | null> {
+    try {
+      const dataPath = path.join(__dirname, '..', '..', '..', 'src', 'twilio', 'assistant', assistantType, 'data.json');
+      const fs = require('fs');
+      const dataContent = fs.readFileSync(dataPath, 'utf8');
+      const qaData = JSON.parse(dataContent);
+
+      // Normalize question for comparison (lowercase, trim, remove extra spaces)
+      const normalizedQuestion = question.toLowerCase().trim().replace(/\s+/g, ' ');
+
+      // Find exact match
+      for (const item of qaData) {
+        const normalizedDataQuestion = item.question.toLowerCase().trim().replace(/\s+/g, ' ');
+        if (normalizedDataQuestion === normalizedQuestion) {
+          return item.answer;
+        }
+      }
+
+      // If no exact match found, return null to use AI response
+      return null;
+    } catch (error) {
+      this.logger.warn(`Could not load data for assistant type: ${assistantType}`);
+      return null;
     }
   }
 
