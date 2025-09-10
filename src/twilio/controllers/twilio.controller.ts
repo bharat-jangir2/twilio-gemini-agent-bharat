@@ -77,12 +77,18 @@ export class TwilioController {
     const sessionId = questionDto.sessionId || `api-${Date.now()}`;
     const phoneNumber = questionDto.phoneNumber || 'api-call';
 
-    // COMMENTED OUT: Database-based RAG process
+    console.log(`🔍 [QUESTION API] Request received:`);
+    console.log(`   Question: "${questionDto.question}"`);
+    console.log(`   Assistant Type: ${assistantType}`);
+    console.log(`   Session ID: ${sessionId}`);
+    console.log(`   Phone Number: ${phoneNumber}`);
+
+    // KEEP: Session management for conversation history
     // Create or get conversation session
-    // const session = this.qdrantDBService['conversationLogger'].getOrCreateSession(sessionId, assistantType, phoneNumber);
+    const session = this.qdrantDBService['conversationLogger'].getOrCreateSession(sessionId, assistantType, phoneNumber);
 
     // Create interaction for this Q&A
-    // const interaction = this.qdrantDBService['conversationLogger'].createInteraction(questionDto.question, false);
+    const interaction = this.qdrantDBService['conversationLogger'].createInteraction(questionDto.question, false);
 
     try {
       // COMMENTED OUT: Redis lookup
@@ -129,8 +135,15 @@ export class TwilioController {
       //   timestamp: lastInteraction?.timestamp,
       // };
 
-      // NEW: Direct AI response using QdrantDBService's AI provider
-      const answer = await this.qdrantDBService.getDirectAIResponse(questionDto.question, assistantType);
+      // NEW: Direct AI response using QdrantDBService's AI provider with conversation context
+      const answer = await this.qdrantDBService.getDirectAIResponse(questionDto.question, assistantType, sessionId);
+
+      // KEEP: Update interaction with response for session tracking
+      this.qdrantDBService['conversationLogger'].updateAnswer(interaction, answer);
+      this.qdrantDBService['conversationLogger'].updateSourceDirectAI(interaction);
+
+      // KEEP: Add interaction to session for conversation history
+      await this.qdrantDBService['conversationLogger'].addInteraction(session.sessionId, interaction);
 
       return {
         sessionId,
@@ -141,9 +154,8 @@ export class TwilioController {
         note: 'Response generated directly from AI without database lookup',
       };
     } catch (error) {
-      // COMMENTED OUT: Database error handling
-      // Update error in interaction
-      // this.qdrantDBService['conversationLogger'].updateError(interaction, error.message);
+      // KEEP: Error handling for session tracking
+      this.qdrantDBService['conversationLogger'].updateError(interaction, error.message);
       throw new BadRequestException(`Failed to generate AI response: ${error.message}`);
     }
   }

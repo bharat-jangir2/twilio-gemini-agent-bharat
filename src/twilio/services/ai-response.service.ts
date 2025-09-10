@@ -40,12 +40,12 @@ export class AIResponseService {
     const sessionId = callSid || 'unknown';
     const hasCorrections = originalTranscription && originalTranscription !== correctedTranscription;
 
-    // COMMENTED OUT: Database-based RAG process
+    // KEEP: Session management for call tracking
     // Create or get conversation session
-    // const session = this.conversationLogger.getOrCreateSession(sessionId, assistantType, phoneNumber);
+    const session = this.conversationLogger.getOrCreateSession(sessionId, assistantType, phoneNumber);
 
     // Create interaction for this Q&A
-    // const interaction = this.conversationLogger.createInteraction(correctedTranscription, !!hasCorrections);
+    const interaction = this.conversationLogger.createInteraction(correctedTranscription, !!hasCorrections);
 
     try {
       // COMMENTED OUT: Redis lookup
@@ -96,19 +96,24 @@ export class AIResponseService {
       //   return responseText;
       // }
 
-      // NEW: Direct AI response using QdrantDBService's direct method
-      const responseText = await this.qdrantDBService.getDirectAIResponse(correctedTranscription, assistantType);
+      // NEW: Direct AI response using QdrantDBService's direct method with conversation context
+      const responseText = await this.qdrantDBService.getDirectAIResponse(correctedTranscription, assistantType, sessionId);
+
+      // KEEP: Update interaction with response for session tracking
+      this.conversationLogger.updateAnswer(interaction, responseText);
+      this.conversationLogger.updateSourceDirectAI(interaction);
+
+      // KEEP: Add interaction to session for call history
+      await this.conversationLogger.addInteraction(session.sessionId, interaction);
 
       return responseText;
     } catch (error) {
-      // COMMENTED OUT: Database error handling
-      // const vectorDatabase = this.configService.get<string>('VECTOR_DATABASE') || 'chroma';
-      // this.logger.error(`${vectorDatabase.toUpperCase()} RAG approach failed:`, error);
+      // KEEP: Error handling for session tracking
+      this.logger.error('Direct AI response failed:', error);
 
       // Update error in interaction
-      // this.conversationLogger.updateError(interaction, error.message);
+      this.conversationLogger.updateError(interaction, error.message);
 
-      this.logger.error('Direct AI response failed:', error);
       throw error;
     }
 

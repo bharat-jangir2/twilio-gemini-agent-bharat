@@ -378,29 +378,115 @@ export class QdrantDBService {
   }
 
   // Generate direct AI response without database lookup
-  async getDirectAIResponse(question: string, assistantType: string = 'general'): Promise<string> {
+  async getDirectAIResponse(question: string, assistantType: string = 'general', sessionId?: string): Promise<string> {
     try {
+      this.logger.log(`🔍 [DIRECT AI] Starting response generation for session: ${sessionId}`);
+      this.logger.log(`🔍 [DIRECT AI] Question: "${question}"`);
+      this.logger.log(`🔍 [DIRECT AI] Assistant Type: ${assistantType}`);
+
       // Load assistant-specific prompt instructions
       const assistantInstructions = await this.loadAssistantPrompt(assistantType);
+      this.logger.log(`🔍 [DIRECT AI] Loaded assistant instructions: ${assistantInstructions.substring(0, 100)}...`);
 
       // For general assistant, check if question matches data.json
       if (assistantType === 'general') {
+        this.logger.log(`🔍 [DIRECT AI] Checking data.json for exact match...`);
         const dataAnswer = await this.getAnswerFromData(question, assistantType);
         if (dataAnswer) {
+          this.logger.log(`✅ [DIRECT AI] Found exact match in data.json: "${dataAnswer}"`);
           return dataAnswer;
+        } else {
+          this.logger.log(`❌ [DIRECT AI] No exact match found in data.json`);
         }
       }
 
-      // If no data match found, use AI with instructions
-      const prompt = `${assistantInstructions}
-Question: ${question}
-IMPORTANT: This question is not in your predefined knowledge base. You should respond naturally saying that you don't have specific information about this topic in your knowledge base, but you're happy to help with other questions that are available. Do NOT use your general knowledge to answer this question. Provide your response in a natural, conversational way suitable for a phone conversation.`;
+      // Get conversation history for context
+      this.logger.log(`🔍 [DIRECT AI] Retrieving conversation history for session: ${sessionId}`);
+      const conversationHistory = await this.getConversationHistory(sessionId);
+
+      if (conversationHistory && conversationHistory.length > 0) {
+        this.logger.log(`✅ [DIRECT AI] Found ${conversationHistory.length} previous interactions:`);
+        conversationHistory.forEach((interaction, index) => {
+          this.logger.log(`   ${index + 1}. Q: "${interaction.question}"`);
+          this.logger.log(`      A: "${interaction.answer}"`);
+        });
+      } else {
+        this.logger.log(`❌ [DIRECT AI] No conversation history found`);
+      }
+
+      // Build context-aware prompt
+      let prompt = `${assistantInstructions}
+
+IMPORTANT: This question is not in your predefined knowledge base. However, you can use information from the conversation context below to answer questions about what the user has told you during this conversation.`;
+
+      // Add conversation context if available
+      if (conversationHistory && conversationHistory.length > 0) {
+        prompt += `\n\nConversation Context:\n`;
+        conversationHistory.forEach((interaction, index) => {
+          prompt += `${index + 1}. User: ${interaction.question}\n`;
+          prompt += `   Assistant: ${interaction.answer}\n`;
+        });
+        prompt += `\nCurrent Question: ${question}`;
+        prompt += `\n\nPlease respond naturally considering the conversation context above. You can use information the user has shared during this conversation to answer their questions. If the current question relates to previous topics or information shared by the user, you can reference that information.`;
+      } else {
+        prompt += `\n\nQuestion: ${question}`;
+        prompt += `\n\nSince there's no conversation context, respond naturally saying that you don't have specific information about this topic in your knowledge base, but you're happy to help with other questions that are available.`;
+      }
+
+      prompt += `\n\nProvide your response in a natural, conversational way suitable for a phone conversation.`;
+
+      this.logger.log(`🔍 [DIRECT AI] Generated prompt length: ${prompt.length} characters`);
+      this.logger.log(`🔍 [DIRECT AI] Prompt preview: ${prompt.substring(0, 200)}...`);
 
       const response = await this.aiProvider.invoke(prompt);
+      this.logger.log(`✅ [DIRECT AI] AI Response: "${response.content}"`);
+
       return response.content;
     } catch (error) {
-      this.logger.error('Error in direct AI response:', error);
+      this.logger.error('❌ [DIRECT AI] Error in direct AI response:', error);
       throw error;
+    }
+  }
+
+  // Get conversation history for context-aware responses
+  private async getConversationHistory(sessionId?: string): Promise<Array<{ question: string; answer: string }> | null> {
+    if (!sessionId) {
+      this.logger.log(`🔍 [CONVERSATION HISTORY] No sessionId provided`);
+      return null;
+    }
+
+    try {
+      this.logger.log(`🔍 [CONVERSATION HISTORY] Retrieving session: ${sessionId}`);
+
+      // Get session from conversation logger
+      const session = await this.conversationLogger.getSession(sessionId);
+
+      if (!session) {
+        this.logger.log(`❌ [CONVERSATION HISTORY] Session not found: ${sessionId}`);
+        return null;
+      }
+
+      if (!session.interactions || session.interactions.length === 0) {
+        this.logger.log(`❌ [CONVERSATION HISTORY] No interactions found in session: ${sessionId}`);
+        return null;
+      }
+
+      this.logger.log(`✅ [CONVERSATION HISTORY] Found ${session.interactions.length} total interactions in session`);
+
+      // Get last 5 interactions for context (to avoid too long prompts)
+      const recentInteractions = session.interactions.slice(-5);
+      this.logger.log(`🔍 [CONVERSATION HISTORY] Using last ${recentInteractions.length} interactions for context`);
+
+      const history = recentInteractions.map((interaction) => ({
+        question: interaction.question,
+        answer: interaction.answer || 'No answer available',
+      }));
+
+      this.logger.log(`✅ [CONVERSATION HISTORY] Returning conversation history:`, history);
+      return history;
+    } catch (error) {
+      this.logger.warn(`❌ [CONVERSATION HISTORY] Could not retrieve conversation history for session ${sessionId}:`, error);
+      return null;
     }
   }
 

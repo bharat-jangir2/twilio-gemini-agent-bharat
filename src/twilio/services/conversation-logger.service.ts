@@ -296,7 +296,7 @@ export class ConversationLoggerService {
     } else {
       aiModel = 'unknown AI provider';
     }
-    
+
     interaction.source.type = `Low confidence (confidence < ${this.qdrantLowConfidenceScore.toFixed(2)}) ignore weak vector DB (qdrant) context, use ${aiModel} with prompt.`;
     if (context) {
       interaction.source.context = context.map((doc) => `Score: ${doc.score.toFixed(2)} | ${doc.content}`);
@@ -315,7 +315,7 @@ export class ConversationLoggerService {
     } else {
       aiModel = 'unknown AI provider';
     }
-    
+
     interaction.source.type = `Zero confidence (no context in vector DB qdrant) use ${aiModel} with prompt only.`;
     if (context) {
       interaction.source.context = context.map((doc) => `Score: ${doc.score.toFixed(2)} | ${doc.content}`);
@@ -336,6 +336,22 @@ export class ConversationLoggerService {
     }
 
     interaction.source.type = `Zero confidence (no context) use ${aiModel} with prompt only`;
+  }
+
+  // Updates the source type for direct AI responses (bypassing database)
+  updateSourceDirectAI(interaction: ConversationInteraction): void {
+    const aiProvider = process.env.AI_PROVIDER;
+    let aiModel: string;
+
+    if (aiProvider === 'google') {
+      aiModel = process.env.GOOGLE_AI_MODEL || 'unknown model';
+    } else if (aiProvider === 'openai') {
+      aiModel = process.env.OPENAI_MODEL || 'unknown model';
+    } else {
+      aiModel = 'unknown AI provider';
+    }
+
+    interaction.source.type = `Direct AI response using ${aiProvider} (${aiModel}) - bypassed database lookup.`;
   }
 
   /**
