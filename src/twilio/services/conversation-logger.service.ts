@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,7 +42,7 @@ export interface ConversationSession {
  * Service for logging complete conversation sessions
  */
 @Injectable()
-export class ConversationLoggerService {
+export class ConversationLoggerService implements OnModuleInit {
   private readonly logger = new Logger(ConversationLoggerService.name);
   private readonly logDirectory: string;
   private readonly sessionCache: Map<string, ConversationSession> = new Map();
@@ -63,6 +63,18 @@ export class ConversationLoggerService {
     this.logger.log(
       `ConversationLoggerService initialized with Qdrant high confidence score threshold: ${this.qdrantHighConfidenceScore}, low confidence score threshold: ${this.qdrantLowConfidenceScore}`,
     );
+  }
+
+  /**
+   * Initialize cleanup on module start
+   */
+  async onModuleInit() {
+    this.logger.log('🧹 [CLEANUP] Initializing conversation logger service...');
+
+    // Clean up any old sessions that might have been left behind
+    await this.cleanupOldSessions();
+
+    this.logger.log('✅ [CLEANUP] Conversation logger service initialized');
   }
 
   /**
@@ -479,9 +491,102 @@ export class ConversationLoggerService {
 
         // Send email notification
         await this.sendSessionEndEmail(session);
+
+        // Clean up the session after email is sent
+        await this.cleanupSession(sessionId);
       }
     } catch (error) {
       this.logger.error(`Failed to end session ${sessionId}:`, error);
+    }
+  }
+
+  /**
+   * Clean up session data after call ends
+   * @param sessionId - The session ID to clean up
+   */
+  private async cleanupSession(sessionId: string): Promise<void> {
+    try {
+      this.logger.log(`🧹 [CLEANUP] Starting cleanup for session: ${sessionId}`);
+
+      // 1. Remove from memory cache
+      const removedFromCache = this.sessionCache.delete(sessionId);
+      if (removedFromCache) {
+        this.logger.log(`✅ [CLEANUP] Removed session ${sessionId} from memory cache`);
+      }
+
+      // 2. Delete conversation file
+      const filePath = this.getSessionFilePath(sessionId);
+      try {
+        await fs.promises.unlink(filePath);
+        this.logger.log(`✅ [CLEANUP] Deleted conversation file: ${filePath}`);
+      } catch (fileError) {
+        if (fileError.code === 'ENOENT') {
+          this.logger.log(`ℹ️ [CLEANUP] Conversation file already deleted: ${filePath}`);
+        } else {
+          this.logger.warn(`⚠️ [CLEANUP] Failed to delete conversation file ${filePath}:`, fileError);
+        }
+      }
+
+      // 3. Clean up any old sessions (optional - runs periodically)
+      await this.cleanupOldSessions();
+
+      this.logger.log(`✅ [CLEANUP] Completed cleanup for session: ${sessionId}`);
+    } catch (error) {
+      this.logger.error(`❌ [CLEANUP] Failed to cleanup session ${sessionId}:`, error);
+    }
+  }
+
+  /**
+   * Clean up old sessions that might have been missed
+   * This runs periodically to ensure no sessions are left behind
+   */
+  private async cleanupOldSessions(): Promise<void> {
+    try {
+      const now = new Date();
+      const cleanupThreshold = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+      let cleanedCount = 0;
+
+      // Clean up old sessions from memory cache
+      for (const [sessionId, session] of this.sessionCache.entries()) {
+        const sessionTime = new Date(session.lastUpdateTime || session.startTime);
+        const timeDiff = now.getTime() - sessionTime.getTime();
+
+        if (timeDiff > cleanupThreshold) {
+          this.sessionCache.delete(sessionId);
+          cleanedCount++;
+          this.logger.log(
+            `🧹 [CLEANUP] Removed old session from cache: ${sessionId} (age: ${Math.round(timeDiff / (60 * 60 * 1000))} hours)`,
+          );
+        }
+      }
+
+      // Clean up old conversation files
+      try {
+        const files = await fs.promises.readdir(this.logDirectory);
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = path.join(this.logDirectory, file);
+            const stats = await fs.promises.stat(filePath);
+            const timeDiff = now.getTime() - stats.mtime.getTime();
+
+            if (timeDiff > cleanupThreshold) {
+              await fs.promises.unlink(filePath);
+              cleanedCount++;
+              this.logger.log(
+                `🧹 [CLEANUP] Deleted old conversation file: ${file} (age: ${Math.round(timeDiff / (60 * 60 * 1000))} hours)`,
+              );
+            }
+          }
+        }
+      } catch (dirError) {
+        this.logger.warn(`⚠️ [CLEANUP] Failed to read log directory for cleanup:`, dirError);
+      }
+
+      if (cleanedCount > 0) {
+        this.logger.log(`✅ [CLEANUP] Cleaned up ${cleanedCount} old sessions and files`);
+      }
+    } catch (error) {
+      this.logger.error(`❌ [CLEANUP] Failed to cleanup old sessions:`, error);
     }
   }
 

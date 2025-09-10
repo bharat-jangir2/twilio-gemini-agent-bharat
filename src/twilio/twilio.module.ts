@@ -12,6 +12,7 @@ import { AIResponseService } from './services/ai-response.service';
 import { AudioProcessingService } from './services/audio-processing.service';
 import { ChromaDBService } from './services/chroma-db.services';
 import { ConversationLoggerService } from './services/conversation-logger.service';
+import { DirectAIService } from './services/direct-ai.service';
 import { ElevenLabsService } from './services/elevenlabs.service';
 import { EmailService } from './services/email.service';
 import { EmbeddingService } from './services/embedding.service';
@@ -46,6 +47,7 @@ import { WordCorrectionService } from './services/word-correction.service';
     ChromaDBService,
     QdrantDBService,
     ConversationLoggerService,
+    DirectAIService,
     EmailService,
     EmbeddingService,
     GoogleCloudService,

@@ -5,6 +5,7 @@ import { EndCallDto, MakeCallDto, QuestionDto } from '../interfaces/twilio.inter
 import { QdrantDBService } from '../services/qdrant-db.services';
 import { RedisService } from '../services/redis.service';
 import { TwilioApiService } from '../services/twilio-api.service';
+import { DirectAIService } from '../services/direct-ai.service';
 
 @Controller('voice')
 export class TwilioController {
@@ -12,6 +13,7 @@ export class TwilioController {
     private readonly twilioApiService: TwilioApiService,
     private readonly qdrantDBService: QdrantDBService,
     private readonly redisService: RedisService,
+    private readonly directAIService: DirectAIService,
   ) {}
 
   // Handles incoming Twilio calls and generates TwiML with WebSocket stream configuration
@@ -135,8 +137,8 @@ export class TwilioController {
       //   timestamp: lastInteraction?.timestamp,
       // };
 
-      // NEW: Direct AI response using QdrantDBService's AI provider with conversation context
-      const answer = await this.qdrantDBService.getDirectAIResponse(questionDto.question, assistantType, sessionId);
+      // NEW: Direct AI response using DirectAIService with conversation context
+      const answer = await this.directAIService.getDirectAIResponse(questionDto.question, assistantType, sessionId);
 
       // KEEP: Update interaction with response for session tracking
       this.qdrantDBService['conversationLogger'].updateAnswer(interaction, answer);
@@ -144,6 +146,12 @@ export class TwilioController {
 
       // KEEP: Add interaction to session for conversation history
       await this.qdrantDBService['conversationLogger'].addInteraction(session.sessionId, interaction);
+
+      // NEW: For Question API, we can end the session after each request
+      // This ensures conversation logs are cleaned up immediately after email is sent
+      // If you want to maintain conversation history across multiple Question API calls,
+      // comment out the line below and sessions will persist until manually cleaned
+      await this.qdrantDBService['conversationLogger'].endSession(sessionId);
 
       return {
         sessionId,

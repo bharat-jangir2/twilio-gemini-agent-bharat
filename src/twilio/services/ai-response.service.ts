@@ -6,6 +6,7 @@ import { RedisService } from './redis.service';
 import { ChromaDBService } from './chroma-db.services';
 import { QdrantDBService } from './qdrant-db.services';
 import { ConversationLoggerService } from './conversation-logger.service';
+import { DirectAIService } from './direct-ai.service';
 
 @Injectable()
 export class AIResponseService {
@@ -20,6 +21,7 @@ export class AIResponseService {
     private readonly chromaDBService: ChromaDBService,
     private readonly qdrantDBService: QdrantDBService,
     private readonly conversationLogger: ConversationLoggerService,
+    private readonly directAIService: DirectAIService,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
@@ -96,8 +98,8 @@ export class AIResponseService {
       //   return responseText;
       // }
 
-      // NEW: Direct AI response using QdrantDBService's direct method with conversation context
-      const responseText = await this.qdrantDBService.getDirectAIResponse(correctedTranscription, assistantType, sessionId);
+      // NEW: Direct AI response using DirectAIService with conversation context
+      const responseText = await this.directAIService.getDirectAIResponse(correctedTranscription, assistantType, sessionId);
 
       // KEEP: Update interaction with response for session tracking
       this.conversationLogger.updateAnswer(interaction, responseText);
