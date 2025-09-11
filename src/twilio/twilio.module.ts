@@ -10,6 +10,8 @@ import { TwilioGateway } from './gateway/twilio.gateway';
 import { ChatGateway } from './gateway/chat.gateway';
 import { AIResponseService } from './services/ai-response.service';
 import { AudioProcessingService } from './services/audio-processing.service';
+import { BookingFlowService } from './services/booking-flow.service';
+import { BookingSessionService } from './services/booking-session.service';
 import { ChromaDBService } from './services/chroma-db.services';
 import { ConversationLoggerService } from './services/conversation-logger.service';
 import { DirectAIService } from './services/direct-ai.service';
@@ -18,6 +20,7 @@ import { EmailService } from './services/email.service';
 import { EmbeddingService } from './services/embedding.service';
 import { GoogleCloudService } from './services/google-cloud.service';
 import { OpenAIAssistantService } from './services/open-ai-assistant.service';
+import { OpenAIBookingAssistantService } from './services/openai-booking-assistant.service';
 import { QdrantDBService } from './services/qdrant-db.services';
 import { RedisService } from './services/redis.service';
 import { SpeechService } from './services/speech.service';
@@ -42,6 +45,7 @@ import { WordCorrectionService } from './services/word-correction.service';
     AIResponseService,
     TwilioApiService,
     OpenAIAssistantService,
+    OpenAIBookingAssistantService,
     RedisService,
     WordCorrectionService,
     ChromaDBService,
@@ -52,6 +56,8 @@ import { WordCorrectionService } from './services/word-correction.service';
     EmbeddingService,
     GoogleCloudService,
     SpeechService,
+    BookingSessionService,
+    BookingFlowService,
   ],
   exports: [RedisService, ChromaDBService, QdrantDBService, ConversationLoggerService, EmailService, SpeechService],
 })

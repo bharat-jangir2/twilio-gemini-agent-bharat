@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AIResponseService } from './ai-response.service';
 import { SpeechService } from './speech.service';
 import { WordCorrectionService } from './word-correction.service';
+import { BookingFlowService } from './booking-flow.service';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class AudioProcessingService {
     private readonly speechService: SpeechService,
     private readonly aiResponseService: AIResponseService,
     private readonly wordCorrectionService: WordCorrectionService,
+    private readonly bookingFlowService: BookingFlowService,
     // private readonly whisperService: WhisperService, // Available if needed
   ) {}
 
@@ -66,21 +68,35 @@ export class AudioProcessingService {
           originalTranscription,
           correctedTranscription,
           transcriptionTime,
-          callSid
+          callSid,
         });
       }
 
       const aiResponseGenerationStartTime = Date.now();
 
-      // Pass callSid as sessionId to AI response service
-      const response = await this.aiResponseService.generateResponse(
-        correctedTranscription,
-        assistantType,
-        threadId,
-        callSid,
-        phoneNumber,
-        originalTranscription,
-      );
+      let response: string;
+
+      // Check if user is in booking flow
+      if (callSid && this.bookingFlowService.hasActiveBookingSession(callSid)) {
+        this.logger.log(`📋 [BOOKING] Processing booking response for call: ${callSid}`);
+        try {
+          response = await this.bookingFlowService.processBookingResponse(callSid, correctedTranscription);
+        } catch (bookingError) {
+          this.logger.error(`❌ [BOOKING] Error in booking flow:`, bookingError);
+          response =
+            "I'm sorry, there was an issue with your booking. Please try again or press 1 to restart the booking process.";
+        }
+      } else {
+        // Regular AI response flow
+        response = await this.aiResponseService.generateResponse(
+          correctedTranscription,
+          assistantType,
+          threadId,
+          callSid,
+          phoneNumber,
+          originalTranscription,
+        );
+      }
 
       this.logger.verbose(`
         ✅ AI response generation took ${Date.now() - aiResponseGenerationStartTime} ms
@@ -92,7 +108,7 @@ export class AudioProcessingService {
           question: correctedTranscription,
           response,
           responseTime: Date.now() - aiResponseGenerationStartTime,
-          callSid
+          callSid,
         });
       }
 
@@ -100,15 +116,15 @@ export class AudioProcessingService {
       // chunkMap.clear(); // Clearing is handled in TwilioGateway after this call
     } catch (error) {
       this.logger.error('Error processing audio chunks:', error);
-      
+
       // Broadcast error event
       if (conversationEventCallback) {
         conversationEventCallback('processingError', {
           error: error.message,
-          callSid
+          callSid,
         });
       }
-      
+
       // Potentially call sendResponseToCaller with an error message
       // await sendResponseToCaller("I'm sorry, I encountered an error processing your audio.");
     }

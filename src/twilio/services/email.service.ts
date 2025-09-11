@@ -130,11 +130,11 @@ export class EmailService {
 
       const fromName = this.configService.get<string>('SMTP_FROM_NAME') || 'AI Voice Assistant';
       const fromEmail = this.configService.get<string>('SMTP_EMAIL_FROM');
-      
+
       // Get email recipients from environment variable or use default
       const emailRecipients = this.configService.get<string>('CONVERSATION_EMAIL_RECIPIENTS');
-      const toEmails = emailRecipients 
-        ? emailRecipients.split(',').map(email => email.trim())
+      const toEmails = emailRecipients
+        ? emailRecipients.split(',').map((email) => email.trim())
         : ['ramsample1@gmail.com', 'ramsample2@gmail.com'];
 
       if (!fromEmail) {
@@ -345,6 +345,40 @@ export class EmailService {
       return `${minutes}m ${remainingSeconds}s`;
     } else {
       return `${remainingSeconds}s`;
+    }
+  }
+
+  /**
+   * Send a generic email
+   * @param options - Email options (to, subject, html, text)
+   */
+  async sendEmail(options: { to: string; subject: string; html?: string; text?: string }): Promise<boolean> {
+    try {
+      if (!this.transporter) {
+        this.logger.error('Email transporter not initialized');
+        return false;
+      }
+
+      const fromEmail = this.configService.get<string>('SMTP_EMAIL_FROM');
+      if (!fromEmail) {
+        this.logger.error('SMTP_EMAIL_FROM not configured');
+        return false;
+      }
+
+      const mailOptions = {
+        from: `"AI Voice Assistant" <${fromEmail}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email sent successfully to ${options.to}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to send email to ${options.to}:`, error);
+      return false;
     }
   }
 

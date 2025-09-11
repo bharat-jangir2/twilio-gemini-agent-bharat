@@ -8,6 +8,8 @@ import { AudioProcessingService } from '../services/audio-processing.service';
 import { SpeechService } from '../services/speech.service';
 import { OpenAIAssistantService } from '../services/open-ai-assistant.service';
 import { ConversationLoggerService } from '../services/conversation-logger.service';
+import { BookingFlowService } from '../services/booking-flow.service';
+import { BookingSessionService } from '../services/booking-session.service';
 import { ChatGateway } from './chat.gateway';
 import {
   MIN_ACTIVE_CHUNKS,
@@ -41,6 +43,8 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly audioProcessingService: AudioProcessingService,
     private readonly openAIAssistantService: OpenAIAssistantService,
     private readonly conversationLoggerService: ConversationLoggerService,
+    private readonly bookingFlowService: BookingFlowService,
+    private readonly bookingSessionService: BookingSessionService,
     private readonly chatGateway: ChatGateway,
   ) {
     if (!fs.existsSync(this.tempDir)) {
@@ -151,6 +155,12 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.logger.log(
             `WebSocket event "stop" received for stream: ${TwilioWebSocketParsedPayload.stop.streamSid}. CallSid: ${TwilioWebSocketParsedPayload.stop.callSid}`,
           );
+
+          // Clean up booking session when call ends
+          if (TwilioWebSocketParsedPayload.stop.callSid) {
+            this.bookingFlowService.clearBookingSession(TwilioWebSocketParsedPayload.stop.callSid);
+          }
+
           if (this.activeStreams.has(TwilioWebSocketParsedPayload.stop.streamSid)) {
             this.activeStreams.delete(TwilioWebSocketParsedPayload.stop.streamSid);
             this.logger.log(`Stream ${TwilioWebSocketParsedPayload.stop.streamSid} removed from active streams.`);
@@ -161,8 +171,26 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
           }
         } else if (TwilioWebSocketParsedPayload.event === 'dtmf') {
           this.logger.log(
-            `DTMF received on stream ${streamSid}: ${TwilioWebSocketParsedPayload.dtmf.digits}, direction=${TwilioWebSocketParsedPayload.dtmf.direction}`,
+            `DTMF received on stream ${streamSid}: ${TwilioWebSocketParsedPayload.dtmf.digit}, track=${TwilioWebSocketParsedPayload.dtmf.track}`,
           );
+
+          // Handle dialpad "1" for booking
+          this.logger.log(`🔍 [DEBUG] Full DTMF payload:`, JSON.stringify(TwilioWebSocketParsedPayload.dtmf, null, 2));
+
+          // Try different ways to access DTMF digits
+          const dtmfDigits =
+            TwilioWebSocketParsedPayload.dtmf?.digits ||
+            TwilioWebSocketParsedPayload.dtmf?.digit ||
+            TwilioWebSocketParsedPayload.dtmf;
+
+          this.logger.log(`🔍 [DEBUG] DTMF digits extracted: "${dtmfDigits}" (type: ${typeof dtmfDigits})`);
+
+          if (dtmfDigits === '1' || dtmfDigits === 1) {
+            this.logger.log(`📋 [BOOKING] DTMF "1" detected! Starting booking flow...`);
+            await this.handleBookingRequest(streamSid);
+          } else {
+            this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match "1"`);
+          }
         } else if (TwilioWebSocketParsedPayload.event === 'mark') {
           this.logger.verbose(`
         📥 WebSocket Event Received: "mark"
@@ -217,7 +245,22 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
         await this.handleMediaMessage(msg as MediaMessage, streamState, streamSid);
         break;
       case 'dtmf':
-        this.logger.log(`DTMF received on stream ${streamSid}: ${msg.dtmf.digits}, direction=${msg.dtmf.direction}`);
+        this.logger.log(`DTMF received on stream ${streamSid}: ${msg.dtmf.digit}, track=${msg.dtmf.track}`);
+
+        // Handle dialpad "1" for booking
+        this.logger.log(`🔍 [DEBUG] Full DTMF payload:`, JSON.stringify(msg.dtmf, null, 2));
+
+        // Try different ways to access DTMF digits
+        const dtmfDigits = msg.dtmf?.digits || msg.dtmf?.digit || msg.dtmf;
+
+        this.logger.log(`🔍 [DEBUG] DTMF digits extracted: "${dtmfDigits}" (type: ${typeof dtmfDigits})`);
+
+        if (dtmfDigits === '1' || dtmfDigits === 1) {
+          this.logger.log(`📋 [BOOKING] DTMF "1" detected! Starting booking flow...`);
+          await this.handleBookingRequest(streamSid);
+        } else {
+          this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match "1"`);
+        }
         break;
       case 'mark':
         this.logger.verbose(`
@@ -281,7 +324,7 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const streamState = this.activeStreams.get(streamSid);
     if (streamState) {
       const assistantNamePart = await this.getAssistantFriendlyNameForWelcome();
-      const welcomeText = `Hello, I am your ${assistantNamePart} assistant. How can I help you today?`;
+      const welcomeText = `Hello, I am your ${assistantNamePart} assistant. How can I help you today? If you'd like to make a booking, please press 1 on your keypad.`;
       await this.playWelcomeMessage(streamSid, welcomeText);
       streamState.isWelcomeMessagePlaying = true;
 
@@ -556,6 +599,40 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(`Sent stop mark '${stopMarkName}' to interrupt playback on stream ${streamSid}`);
     } catch (error) {
       this.logger.error(`Error stopping playback on stream ${streamSid}:`, error);
+    }
+  }
+
+  /**
+   * Handles booking request when user presses "1"
+   */
+  private async handleBookingRequest(streamSid: string): Promise<void> {
+    this.logger.log(`🚀 [BOOKING] handleBookingRequest called for streamSid: ${streamSid}`);
+
+    const streamState = this.activeStreams.get(streamSid);
+    if (!streamState) {
+      this.logger.error(`❌ [BOOKING] No stream state found for stream ${streamSid}`);
+      return;
+    }
+
+    const callSid = streamState.currentCallSid;
+    this.logger.log(`📋 [BOOKING] User pressed 1 for booking on call: ${callSid}`);
+
+    try {
+      // Stop any current playback
+      this.logger.log(`🛑 [BOOKING] Stopping current playback...`);
+      await this.stopPlayback(streamState, streamSid);
+
+      // Start booking flow
+      this.logger.log(`🚀 [BOOKING] Starting booking flow...`);
+      const bookingMessage = this.bookingFlowService.startBookingFlow(callSid);
+      this.logger.log(`📝 [BOOKING] Booking message generated: "${bookingMessage}"`);
+
+      // Send booking message to caller
+      this.logger.log(`📞 [BOOKING] Sending booking message to caller...`);
+      await this.sendResponseToCaller(bookingMessage, streamSid);
+      this.logger.log(`✅ [BOOKING] Booking flow initiated successfully`);
+    } catch (error) {
+      this.logger.error(`❌ [BOOKING] Error in handleBookingRequest:`, error);
     }
   }
 
