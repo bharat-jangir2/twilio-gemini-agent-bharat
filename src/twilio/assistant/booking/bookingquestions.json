@@ -6,22 +6,14 @@
     },
     {
         "questionNo.": 2,
-        "question": "please tell me your age"
-    },
-    {
-        "questionNo.": 3,
-        "question": "please tell me your gender"
-    },
-    {
-        "questionNo.": 4,
         "question": "please tell me your email"
     },
     {
-        "questionNo.": 5,
+        "questionNo.": 3,
         "question": "please tell me your phone number"
     },
     {
-        "questionNo.": 6,
+        "questionNo.": 4,
         "question":"do you want to confirm the booking"
     }
 ]

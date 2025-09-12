@@ -79,18 +79,19 @@ export class GoogleCloudService {
     const CHUNK_SIZE = 320; // 20ms chunks at 8000Hz
     const FADE_CHUNKS = 3; // 160ms fade-in
     const processedBuffer = Buffer.alloc(audioBuffer.length);
-    
+
     for (let i = 0; i < audioBuffer.length; i += CHUNK_SIZE) {
       const chunkIndex = i / CHUNK_SIZE;
       const chunk = audioBuffer.slice(i, i + CHUNK_SIZE);
-      
+
       if (chunkIndex < FADE_CHUNKS) {
         // Apply fade-in to first 8 chunks (160ms)
         const fadeFactor = Math.min(1.0, (chunkIndex + 1) / FADE_CHUNKS);
-        
+
         for (let k = 0; k < chunk.length; k++) {
           const sample = chunk[k];
-          if (sample !== 0x7f) { // Not silence
+          if (sample !== 0x7f) {
+            // Not silence
             const pcmValue = sample - 0x7f;
             const fadedValue = Math.round(pcmValue * fadeFactor);
             processedBuffer[i + k] = Math.max(0, Math.min(255, fadedValue + 0x7f));
@@ -103,7 +104,7 @@ export class GoogleCloudService {
         chunk.copy(processedBuffer, i);
       }
     }
-    
+
     return processedBuffer;
   }
 
@@ -111,7 +112,7 @@ export class GoogleCloudService {
   private analyzeAudioBuffer(audioBuffer: Buffer): void {
     let silenceCount = 0;
     let maxAmplitude = 0;
-    
+
     for (let i = 0; i < audioBuffer.length; i++) {
       if (audioBuffer[i] === 0x7f) {
         silenceCount++;
@@ -120,9 +121,11 @@ export class GoogleCloudService {
         maxAmplitude = Math.max(maxAmplitude, amplitude);
       }
     }
-    
+
     const silencePercentage = (silenceCount / audioBuffer.length) * 100;
-    this.logger.debug(`Google Cloud Audio Analysis: ${audioBuffer.length} bytes, ${silenceCount} silence samples (${silencePercentage.toFixed(1)}%), max amplitude: ${maxAmplitude}`);
+    this.logger.debug(
+      `Google Cloud Audio Analysis: ${audioBuffer.length} bytes, ${silenceCount} silence samples (${silencePercentage.toFixed(1)}%), max amplitude: ${maxAmplitude}`,
+    );
   }
 
   // Converts text to speech using Google Cloud TTS and returns mu-law audio buffer
@@ -167,9 +170,9 @@ export class GoogleCloudService {
 
       // Apply Google Cloud specific processing to prevent clicks/pops
       const processedAudioBuffer = this.applyFadeInForGoogleCloud(audioBuffer);
-      
+
       this.analyzeAudioBuffer(processedAudioBuffer);
-      
+
       return processedAudioBuffer;
     } catch (error) {
       this.logger.error('Error converting text to speech with Google Cloud:', error);
@@ -200,6 +203,10 @@ export class GoogleCloudService {
         enableAutomaticPunctuation: true,
         enableWordTimeOffsets: false,
         enableWordConfidence: false,
+        speechContexts: [
+          { phrases: ['booking', 'appointment', 'schedule', 'reschedule', 'cancel', 'confirm', 'yes', 'no'] },
+          { phrases: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] },
+        ],
       };
 
       const request = {

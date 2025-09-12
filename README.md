@@ -96,3 +96,55 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+###############################################////////---------------//////###################################
+
+## default structure of twilio raw data
+
+{
+"event": "start",
+"streamSid": "MZ1234567890abcdef1234567890abcdef",
+"start": {
+"accountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+"streamSid": "MZ1234567890abcdef1234567890abcdef",
+"callSid": "CAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
+}
+
+{
+"event": "media",
+"streamSid": "MZ1234567890abcdef1234567890abcdef",
+"media": {
+"track": "inbound",
+"chunk": 1,
+"timestamp": 1234,
+"payload": "Base64EncodedAudio"
+}
+}
+
+{
+"event": "stop",
+"streamSid": "MZ1234567890abcdef1234567890abcdef"
+}
+
+## What Twilio sends over WebSocket:
+
+-> start → when the media stream starts.
+
+-> media → base64-encoded audio chunks.
+
+-> mark → if you send a mark command, you get this back.
+
+-> stop → when the stream ends.
+
+-> clear → if you send clear commands.
+
+## What your WebSocket client library sends (like Node’s ws, or browser WebSocket):
+
+-> open → when the socket connection is established (this is sometimes referred to as “connected”).
+
+-> close → when the socket closes.
+
+-> error → on errors.
+
+-> message → raw data from Twilio (which is what you’re parsing).

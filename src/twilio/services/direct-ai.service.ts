@@ -86,6 +86,7 @@ export class DirectAIService {
       this.logger.log(`🔍 [DIRECT AI] Loaded assistant instructions: ${assistantInstructions.substring(0, 100)}...`);
 
       // For general assistant, check if question matches data.json
+      // Skip data.json checking for booking assistant to allow pure AI processing
       if (assistantType === 'general') {
         this.logger.log(`🔍 [DIRECT AI] Checking data.json for exact match...`);
         const dataAnswer = await this.getAnswerFromData(question, assistantType);
@@ -95,6 +96,8 @@ export class DirectAIService {
         } else {
           this.logger.log(`❌ [DIRECT AI] No exact match found in data.json`);
         }
+      } else if (assistantType === 'booking') {
+        this.logger.log(`📋 [DIRECT AI] Booking mode: Skipping data.json check, using pure AI processing`);
       }
 
       // Get conversation history for context
@@ -114,7 +117,7 @@ export class DirectAIService {
       // Build context-aware prompt
       let prompt = `${assistantInstructions}
 
-IMPORTANT: This question is not in your predefined knowledge base. However, you can use information from the conversation context below to answer questions about what the user has told you during this conversation.`;
+      IMPORTANT: This question is not in your predefined knowledge base. However, you can use information from the conversation context below to answer questions about what the user has told you during this conversation.`;
 
       // Add conversation context if available
       if (conversationHistory && conversationHistory.length > 0) {
@@ -172,26 +175,26 @@ IMPORTANT: This question is not in your predefined knowledge base. However, you 
       const questionsList = qaData.map((item, index) => `${index + 1}. "${item.question}"`).join('\n');
 
       const matchingPrompt = `
-You are a smart question matcher. I have a user question and a list of predefined questions with answers.
+      You are a smart question matcher. I have a user question and a list of predefined questions with answers.
 
-USER QUESTION: "${question}"
+      USER QUESTION: "${question}"
 
-PREDEFINED QUESTIONS:
-${questionsList}
+      PREDEFINED QUESTIONS:
+      ${questionsList}
 
-INSTRUCTIONS:
-1. Analyze the user's question and understand its intent/meaning
-2. Find the BEST matching question from the predefined list that has the SAME INTENT
-3. If you find a match, respond with ONLY the number (1, 2, 3, etc.) of the matching question
-4. If NO question matches the intent, respond with "NO_MATCH"
+      INSTRUCTIONS:
+      1. Analyze the user's question and understand its intent/meaning
+      2. Find the BEST matching question from the predefined list that has the SAME INTENT
+      3. If you find a match, respond with ONLY the number (1, 2, 3, etc.) of the matching question
+      4. If NO question matches the intent, respond with "NO_MATCH"
 
-EXAMPLES:
-- User: "can you tell me a joke" → Should match "Tell me a small joke" → Respond: "1"
-- User: "I want to hear a joke" → Should match "Tell me a small joke" → Respond: "1" 
-- User: "what's a funny joke?" → Should match "Tell me a small joke" → Respond: "1"
-- User: "what is the weather?" → No joke questions match → Respond: "NO_MATCH"
+      EXAMPLES:
+      - User: "can you tell me a joke" → Should match "Tell me a small joke" → Respond: "1"
+      - User: "I want to hear a joke" → Should match "Tell me a small joke" → Respond: "1" 
+      - User: "what's a funny joke?" → Should match "Tell me a small joke" → Respond: "1"
+      - User: "what is the weather?" → No joke questions match → Respond: "NO_MATCH"
 
-RESPOND WITH ONLY THE NUMBER OR "NO_MATCH":`;
+      RESPOND WITH ONLY THE NUMBER OR "NO_MATCH":`;
 
       // Use AI to find the best match
       const matchResult = await this.aiProvider.invoke(matchingPrompt);
