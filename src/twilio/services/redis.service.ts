@@ -42,7 +42,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await this.redisClient.connect();
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (this.isConnected) {
-        await this.populateAllAssistantTypes();
+        // Populate Redis in background to avoid blocking startup
+        this.populateAllAssistantTypes().catch(err => {
+          this.logger.error('Background Redis population failed:', err);
+        });
+        this.logger.log('✅ Redis connected. Q&A population started in background.');
       } else {
         this.logger.error('Could not connect to Redis. Q&A population skipped.');
       }
@@ -60,24 +64,44 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Loads Q&A data for all assistant types into Redis using key prefixes.
+   * Optimized for faster startup by using batch operations.
    */
   private async populateAllAssistantTypes() {
+    const startTime = Date.now();
+    this.logger.log('🔄 Starting Redis population in background...');
+    
     const assistantDirs = glob.sync('src/twilio/assistant/*/data.json');
+    let totalLoaded = 0;
+    
     for (const dataPath of assistantDirs) {
       const assistantType = dataPath.split('/')[3]; // e.g., 'speedel', 'hospital'
       try {
         const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+        
+        // Use pipeline for batch operations (much faster)
+        const pipeline = this.redisClient.multi();
+        let validQAs = 0;
+        
         for (const qa of data) {
           if (qa.question && qa.answer) {
             const key = `${assistantType}:question:${qa.question}`;
-            await this.redisClient.set(key, qa.answer);
+            pipeline.set(key, qa.answer);
+            validQAs++;
           }
         }
-        this.logger.verbose(`Loaded ${data.length} Q&A pairs for assistant type: ${assistantType}`);
+        
+        if (validQAs > 0) {
+          await pipeline.exec();
+          totalLoaded += validQAs;
+          this.logger.verbose(`✅ Loaded ${validQAs} Q&A pairs for assistant type: ${assistantType}`);
+        }
       } catch (error) {
-        this.logger.error(`Error loading data for assistant type: ${assistantType}`, error);
+        this.logger.error(`❌ Error loading data for assistant type: ${assistantType}`, error);
       }
     }
+    
+    const duration = Date.now() - startTime;
+    this.logger.log(`🎉 Redis population completed: ${totalLoaded} Q&A pairs loaded in ${duration}ms`);
   }
 
   /**
@@ -134,3 +158,4 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
+

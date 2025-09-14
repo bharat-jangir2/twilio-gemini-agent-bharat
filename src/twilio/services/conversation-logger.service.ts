@@ -71,6 +71,18 @@ export class ConversationLoggerService implements OnModuleInit {
   async onModuleInit() {
     this.logger.log('🧹 [CLEANUP] Initializing conversation logger service...');
 
+    // Run cleanup in background to avoid blocking startup
+    this.performCleanup().catch(err => {
+      this.logger.error('Background cleanup failed:', err);
+    });
+    
+    this.logger.log('✅ [CLEANUP] Conversation logger service initialized');
+  }
+
+  /**
+   * Perform cleanup operations
+   */
+  private async performCleanup() {
     // Clean up any old sessions that might have been left behind
     await this.cleanupOldSessions();
 

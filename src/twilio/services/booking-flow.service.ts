@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { BookingSessionService, BookingSession } from './booking-session.service';
 import { DirectAIService } from './direct-ai.service';
 import { EmailService } from './email.service';
+import { BookingDataExtractionService } from './booking-data-extraction.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -16,6 +17,7 @@ export class BookingFlowService {
     private readonly directAIService: DirectAIService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly bookingDataExtractionService: BookingDataExtractionService,
   ) {
     this.loadBookingQuestions();
   }
@@ -88,17 +90,22 @@ export class BookingFlowService {
       return "I'm sorry, I don't have an active booking session. Please start over by pressing 1.";
     }
 
-    const currentQuestion = this.getQuestion(session.currentQuestionNo);
-    if (!currentQuestion) {
-      this.logger.warn(`📋 [BOOKING] No question found for number: ${session.currentQuestionNo}`);
-      return "I'm sorry, there was an error with the booking process. Please try again.";
-    }
-
     // Check for cancellation keywords
     if (this.isCancellationRequest(userInput)) {
       this.logBookingCancellation(session, userInput);
       this.bookingSessionService.cancelBooking(callSid);
       return 'Booking cancelled. You can start a new booking anytime by pressing 1. Is there anything else I can help you with?';
+    }
+
+    // Check if we're awaiting confirmation for the last answer
+    if (session.awaitingConfirmation) {
+      return this.handleConfirmationResponse(callSid, userInput, session);
+    }
+
+    const currentQuestion = this.getQuestion(session.currentQuestionNo);
+    if (!currentQuestion) {
+      this.logger.warn(`📋 [BOOKING] No question found for number: ${session.currentQuestionNo}`);
+      return "I'm sorry, there was an error with the booking process. Please try again.";
     }
 
     // Process the user's answer using fast regex validation
@@ -115,32 +122,80 @@ export class BookingFlowService {
       return repromptMessage;
     }
 
-    // Store the answer
-    this.bookingSessionService.addAnswer(callSid, session.currentQuestionNo, currentQuestion.question, processedAnswer);
-    this.logger.log(`✅ [BOOKING] Valid answer for Q${session.currentQuestionNo}: "${processedAnswer}" (${processingTime}ms)`);
+    // Instead of storing the answer immediately, set it for confirmation
+    this.bookingSessionService.setAwaitingConfirmation(callSid, session.currentQuestionNo, processedAnswer);
+    this.logger.log(`📋 [BOOKING] Answer extracted for Q${session.currentQuestionNo}: "${processedAnswer}" - Awaiting confirmation (${processingTime}ms)`);
 
-    // Check if this is the last question BEFORE moving to next
-    this.logger.log(`🔍 [BOOKING] Current question: ${session.currentQuestionNo}/${this.bookingQuestions.length}`);
-    if (session.currentQuestionNo >= this.bookingQuestions.length) {
-      this.logger.log(`🏁 [BOOKING] Last question completed, proceeding to booking completion`);
-      return await this.completeBooking(callSid);
+    // Generate confirmation message
+    return this.generateConfirmationMessage(currentQuestion, processedAnswer);
+  }
+
+  /**
+   * Handles confirmation response (DTMF 4 or 5)
+   */
+  private async handleConfirmationResponse(callSid: string, userInput: string, session: BookingSession): Promise<string> {
+    const input = userInput.toLowerCase().trim();
+    
+    // Check for DTMF or voice confirmation
+    if (input === '4' || input.includes('yes') || input.includes('correct') || input.includes('right')) {
+      // User confirmed the answer
+      const confirmed = this.bookingSessionService.confirmAnswer(callSid);
+      if (confirmed) {
+        this.logger.log(`✅ [BOOKING] Answer confirmed for Q${session.lastQuestionNo} in call: ${callSid}`);
+        
+        // Check if this was the last question
+        if (session.currentQuestionNo >= this.bookingQuestions.length) {
+          this.logger.log(`🏁 [BOOKING] Last question completed, proceeding to booking completion`);
+          return await this.completeBooking(callSid);
+        }
+
+        // Move to next question
+        this.bookingSessionService.moveToNextQuestion(callSid);
+        const nextQuestion = this.getQuestion(session.currentQuestionNo);
+
+        if (!nextQuestion) {
+          this.logger.error(`❌ [BOOKING] No question found for number: ${session.currentQuestionNo}`);
+          return await this.completeBooking(callSid);
+        }
+
+        // Log question progression
+        this.logQuestionProgression(session, nextQuestion);
+
+        return `Perfect! Thank you. Now, ${this.getQuestionPrompt(nextQuestion)}`;
+      }
+    } else if (input === '5' || input.includes('no') || input.includes('incorrect') || input.includes('wrong')) {
+      // User rejected the answer
+      this.bookingSessionService.rejectAnswer(callSid);
+      this.logger.log(`❌ [BOOKING] Answer rejected for Q${session.lastQuestionNo} in call: ${callSid}`);
+      
+      const currentQuestion = this.getQuestion(session.currentQuestionNo);
+      if (currentQuestion) {
+        return `No problem! Let me ask that question again. ${this.getQuestionPrompt(currentQuestion)}`;
+      }
     }
 
-    // Move to next question
-    this.bookingSessionService.moveToNextQuestion(callSid);
-    this.logger.log(`➡️ [BOOKING] Moved to question: ${session.currentQuestionNo}`);
-    const nextQuestion = this.getQuestion(session.currentQuestionNo);
+    // Invalid confirmation response
+    return `I need you to confirm your answer. Press 4 if "${session.lastAnswer}" is correct, or press 5 if it's incorrect.`;
+  }
 
-    // Ensure we have a valid next question
-    if (!nextQuestion) {
-      this.logger.error(`❌ [BOOKING] No question found for number: ${session.currentQuestionNo}`);
-      return await this.completeBooking(callSid);
+  /**
+   * Generates confirmation message for extracted answer
+   */
+  private generateConfirmationMessage(question: any, answer: string): string {
+    const questionNo = question['questionNo.'];
+    
+    switch (questionNo) {
+      case 1: // Name
+        return `I heard your name as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
+      case 2: // Email
+        return `I heard your email as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
+      case 3: // Phone
+        return `I heard your phone number as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
+      case 4: // Confirmation
+        return `I heard your confirmation as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
+      default:
+        return `I heard your answer as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
     }
-
-    // Log question progression
-    this.logQuestionProgression(session, nextQuestion);
-
-    return `Perfect! Thank you. Now, ${this.getQuestionPrompt(nextQuestion)}`;
   }
 
   /**
@@ -171,12 +226,45 @@ export class BookingFlowService {
   }
 
   /**
-   * Optimized answer processing: Fast regex first, AI fallback if needed
+   * Optimized answer processing: Smart extraction first, then regex, then AI fallback
    */
   private async processAnswerOptimized(userInput: string, question: any, session: BookingSession): Promise<string | null> {
     try {
-      // Try fast regex validation first (sub-millisecond)
-      const regexResult = this.validateWithRegex(userInput, question['questionNo.']);
+      const questionNo = question['questionNo.'];
+      
+      // Use smart extraction for email and mobile number questions
+      if (questionNo === 2) { // Email question
+        this.logger.log(`📧 [BOOKING] Using smart email extraction for: "${userInput}"`);
+        const extractionResult = await this.bookingDataExtractionService.extractEmail(userInput);
+        
+        if (extractionResult.success && extractionResult.extractedValue) {
+          this.logger.log(`✅ [BOOKING] Smart email extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`);
+          return extractionResult.extractedValue;
+        } else {
+          this.logger.warn(`❌ [BOOKING] Smart email extraction failed, trying fallback methods`);
+          // Log the processing steps for debugging
+          extractionResult.processedSteps.forEach((step, index) => {
+            this.logger.debug(`📧 [EMAIL] Step ${index + 1}: ${step}`);
+          });
+        }
+      } else if (questionNo === 3) { // Mobile number question
+        this.logger.log(`📱 [BOOKING] Using smart mobile extraction for: "${userInput}"`);
+        const extractionResult = await this.bookingDataExtractionService.extractMobileNumber(userInput);
+        
+        if (extractionResult.success && extractionResult.extractedValue) {
+          this.logger.log(`✅ [BOOKING] Smart mobile extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`);
+          return extractionResult.extractedValue;
+        } else {
+          this.logger.warn(`❌ [BOOKING] Smart mobile extraction failed, trying fallback methods`);
+          // Log the processing steps for debugging
+          extractionResult.processedSteps.forEach((step, index) => {
+            this.logger.debug(`📱 [MOBILE] Step ${index + 1}: ${step}`);
+          });
+        }
+      }
+
+      // Try fast regex validation for all questions (sub-millisecond)
+      const regexResult = this.validateWithRegex(userInput, questionNo);
       if (regexResult) {
         this.logger.log(`⚡ [BOOKING] Fast validation successful: "${regexResult}"`);
         return regexResult;
@@ -196,7 +284,7 @@ export class BookingFlowService {
         this.logger.error(`❌ [BOOKING] AI fallback failed after ${aiTime}ms:`, aiError.message);
 
         // Try one more time with a simpler approach for common edge cases
-        const simpleResult = this.handleCommonEdgeCases(userInput, question['questionNo.']);
+        const simpleResult = this.handleCommonEdgeCases(userInput, questionNo);
         if (simpleResult) {
           this.logger.log(`✅ [BOOKING] Edge case handled: "${simpleResult}"`);
           return simpleResult;
@@ -536,9 +624,9 @@ export class BookingFlowService {
       case 1: // Name
         return `I didn't catch your name there. You said "${userInput}" but I need your full name. Could you please clearly say your first and last name? For example, "John Smith".`;
       case 2: // Email
-        return `I need your email address. You said "${userInput}" but could you please clearly say your email address? For example, "john@gmail.com", "john gmail", "john at yahoo dot com", or "john smith outlook".`;
+        return `I need your email address. You said "${userInput}" but I couldn't extract a valid email. Please try saying it clearly in any of these formats: "john@gmail.com", "john at gmail dot com", "john gmail", or "john smith at yahoo dot com".`;
       case 3: // Phone
-        return `I need your phone number. You said "${userInput}" but could you please clearly say your phone number? For example, "123-456-7890" or just the digits.`;
+        return `I need your phone number. You said "${userInput}" but I couldn't extract a valid phone number. Please try saying it clearly, like "1234567890", "123-456-7890", or "plus 91 1234567890".`;
       case 4: // Confirmation
         return `I need to confirm your booking. You said "${userInput}" but could you please clearly say "Yes" to confirm or "No" to cancel the booking?`;
       default:

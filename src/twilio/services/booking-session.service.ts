@@ -18,6 +18,10 @@ export interface BookingSession {
   lastUpdated: string;
   completedAt?: string;
   cancelledAt?: string;
+  // New confirmation flow properties
+  awaitingConfirmation: boolean;
+  lastAnswer?: string;
+  lastQuestionNo?: number;
 }
 
 @Injectable()
@@ -57,6 +61,10 @@ export class BookingSessionService {
       answers: [],
       createdAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
+      // Initialize confirmation flow properties
+      awaitingConfirmation: false,
+      lastAnswer: undefined,
+      lastQuestionNo: undefined,
     };
 
     this.sessionCache.set(callSid, session);
@@ -228,5 +236,67 @@ export class BookingSessionService {
    */
   private getSessionFilePath(callSid: string): string {
     return path.join(this.logDirectory, `${callSid}.json`);
+  }
+
+  /**
+   * Sets the session to await confirmation for the last answer
+   */
+  setAwaitingConfirmation(callSid: string, questionNo: number, answer: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session) {
+      session.awaitingConfirmation = true;
+      session.lastAnswer = answer;
+      session.lastQuestionNo = questionNo;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📋 [BOOKING] Set awaiting confirmation for Q${questionNo} in call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Confirms the last answer and moves to next question
+   */
+  confirmAnswer(callSid: string): boolean {
+    const session = this.getBookingSession(callSid);
+    if (session && session.awaitingConfirmation && session.lastAnswer && session.lastQuestionNo) {
+      // Add the confirmed answer
+      this.addAnswer(callSid, session.lastQuestionNo, '', session.lastAnswer);
+      
+      // Reset confirmation state
+      session.awaitingConfirmation = false;
+      session.lastAnswer = undefined;
+      session.lastQuestionNo = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      
+      this.logger.log(`✅ [BOOKING] Confirmed answer for Q${session.lastQuestionNo} in call: ${callSid}`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Rejects the last answer and stays on the same question
+   */
+  rejectAnswer(callSid: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session && session.awaitingConfirmation) {
+      // Reset confirmation state but don't move to next question
+      session.awaitingConfirmation = false;
+      session.lastAnswer = undefined;
+      session.lastQuestionNo = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      
+      this.logger.log(`❌ [BOOKING] Rejected answer for Q${session.lastQuestionNo} in call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Checks if the session is awaiting confirmation
+   */
+  isAwaitingConfirmation(callSid: string): boolean {
+    const session = this.getBookingSession(callSid);
+    return session ? session.awaitingConfirmation : false;
   }
 }

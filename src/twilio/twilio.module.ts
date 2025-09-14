@@ -27,6 +27,7 @@ import { SpeechService } from './services/speech.service';
 import { TwilioApiService } from './services/twilio-api.service';
 import { WhisperService } from './services/whisper.service';
 import { WordCorrectionService } from './services/word-correction.service';
+import { BookingDataExtractionService } from './services/booking-data-extraction.service';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { WordCorrectionService } from './services/word-correction.service';
     SpeechService,
     BookingSessionService,
     BookingFlowService,
+    BookingDataExtractionService,
   ],
   exports: [RedisService, ChromaDBService, QdrantDBService, ConversationLoggerService, EmailService, SpeechService],
 })

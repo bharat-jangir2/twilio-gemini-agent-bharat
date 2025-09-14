@@ -9,7 +9,11 @@ import { CustomLogger } from './common/logger/custom-logger.service';
 import { ChatGateway } from './twilio/gateway/chat.gateway';
 
 async function bootstrap() {
+  const startTime = Date.now();
   const logger = new CustomLogger('Main');
+  
+  console.log('🚀 Starting application...');
+  
   const app = await NestFactory.create(AppModule, {
     // logger: new MyCustomLogger(),
     logger: new ConsoleLogger({
@@ -46,6 +50,7 @@ async function bootstrap() {
     console.log(`🚀 Socket.IO server is running on port ${socketPort}`);
   });
 
-  console.log(`🚀 Main server is running on port ${port}`);
+  const startupTime = Date.now() - startTime;
+  console.log(`🚀 Main server is running on port ${port} (startup: ${startupTime}ms)`);
 }
 bootstrap();

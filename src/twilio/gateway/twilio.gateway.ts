@@ -188,8 +188,14 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
           if (dtmfDigits === '1' || dtmfDigits === 1) {
             this.logger.log(`📋 [BOOKING] DTMF "1" detected! Starting booking flow...`);
             await this.handleBookingRequest(streamSid);
+          } else if (dtmfDigits === '4' || dtmfDigits === 4) {
+            this.logger.log(`✅ [BOOKING] DTMF "4" detected! Confirming answer...`);
+            await this.handleBookingConfirmation(streamSid, '4');
+          } else if (dtmfDigits === '5' || dtmfDigits === 5) {
+            this.logger.log(`❌ [BOOKING] DTMF "5" detected! Rejecting answer...`);
+            await this.handleBookingConfirmation(streamSid, '5');
           } else {
-            this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match "1"`);
+            this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match expected values (1, 4, 5)`);
           }
         } else if (TwilioWebSocketParsedPayload.event === 'mark') {
           this.logger.verbose(`
@@ -258,8 +264,14 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (dtmfDigits === '1' || dtmfDigits === 1) {
           this.logger.log(`📋 [BOOKING] DTMF "1" detected! Starting booking flow...`);
           await this.handleBookingRequest(streamSid);
+        } else if (dtmfDigits === '4' || dtmfDigits === 4) {
+          this.logger.log(`✅ [BOOKING] DTMF "4" detected! Confirming answer...`);
+          await this.handleBookingConfirmation(streamSid, '4');
+        } else if (dtmfDigits === '5' || dtmfDigits === 5) {
+          this.logger.log(`❌ [BOOKING] DTMF "5" detected! Rejecting answer...`);
+          await this.handleBookingConfirmation(streamSid, '5');
         } else {
-          this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match "1"`);
+          this.logger.log(`❌ [DEBUG] DTMF "${dtmfDigits}" does not match expected values (1, 4, 5)`);
         }
         break;
       case 'mark':
@@ -633,6 +645,41 @@ export class TwilioGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(`✅ [BOOKING] Booking flow initiated successfully`);
     } catch (error) {
       this.logger.error(`❌ [BOOKING] Error in handleBookingRequest:`, error);
+    }
+  }
+
+  /**
+   * Handles booking confirmation when user presses "4" or "5"
+   */
+  private async handleBookingConfirmation(streamSid: string, confirmation: string): Promise<void> {
+    this.logger.log(`🔔 [BOOKING] handleBookingConfirmation called for streamSid: ${streamSid}, confirmation: ${confirmation}`);
+
+    const streamState = this.activeStreams.get(streamSid);
+    if (!streamState) {
+      this.logger.error(`❌ [BOOKING] No stream state found for stream ${streamSid}`);
+      return;
+    }
+
+    const callSid = streamState.currentCallSid;
+    this.logger.log(`📋 [BOOKING] User pressed ${confirmation} for confirmation on call: ${callSid}`);
+
+    try {
+      // Stop current playback
+      this.logger.log(`🛑 [BOOKING] Stopping current playback...`);
+      await this.stopPlayback(streamState, streamSid);
+
+      // Process confirmation
+      this.logger.log(`🔄 [BOOKING] Processing confirmation...`);
+      const confirmationMessage = await this.bookingFlowService.processBookingResponse(callSid, confirmation);
+      this.logger.log(`📝 [BOOKING] Confirmation message generated: "${confirmationMessage}"`);
+
+      // Send confirmation message to caller
+      this.logger.log(`📞 [BOOKING] Sending confirmation message to caller...`);
+      await this.sendResponseToCaller(confirmationMessage, streamSid);
+
+      this.logger.log(`✅ [BOOKING] Confirmation processed successfully`);
+    } catch (error) {
+      this.logger.error(`❌ [BOOKING] Error in handleBookingConfirmation:`, error);
     }
   }
 
