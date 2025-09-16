@@ -97,6 +97,11 @@ export class BookingFlowService {
       return 'Booking cancelled. You can start a new booking anytime by pressing 1. Is there anything else I can help you with?';
     }
 
+    // Check if we're in letter-by-letter email mode
+    if (this.bookingSessionService.isInEmailLetterByLetterMode(callSid)) {
+      return this.handleEmailLetterByLetterFlow(callSid, userInput, session);
+    }
+
     // Check if we're awaiting confirmation for the last answer
     if (session.awaitingConfirmation) {
       return this.handleConfirmationResponse(callSid, userInput, session);
@@ -106,6 +111,12 @@ export class BookingFlowService {
     if (!currentQuestion) {
       this.logger.warn(`📋 [BOOKING] No question found for number: ${session.currentQuestionNo}`);
       return "I'm sorry, there was an error with the booking process. Please try again.";
+    }
+
+    // Special handling for email question - start letter-by-letter flow
+    if (session.currentQuestionNo === 2 && !this.bookingSessionService.isInEmailLetterByLetterMode(callSid)) {
+      this.bookingSessionService.startEmailLetterByLetterMode(callSid);
+      return this.startEmailLetterByLetterCollection(callSid);
     }
 
     // Process the user's answer using fast regex validation
@@ -124,7 +135,9 @@ export class BookingFlowService {
 
     // Instead of storing the answer immediately, set it for confirmation
     this.bookingSessionService.setAwaitingConfirmation(callSid, session.currentQuestionNo, processedAnswer);
-    this.logger.log(`📋 [BOOKING] Answer extracted for Q${session.currentQuestionNo}: "${processedAnswer}" - Awaiting confirmation (${processingTime}ms)`);
+    this.logger.log(
+      `📋 [BOOKING] Answer extracted for Q${session.currentQuestionNo}: "${processedAnswer}" - Awaiting confirmation (${processingTime}ms)`,
+    );
 
     // Generate confirmation message
     return this.generateConfirmationMessage(currentQuestion, processedAnswer);
@@ -135,14 +148,14 @@ export class BookingFlowService {
    */
   private async handleConfirmationResponse(callSid: string, userInput: string, session: BookingSession): Promise<string> {
     const input = userInput.toLowerCase().trim();
-    
+
     // Check for DTMF or voice confirmation
     if (input === '4' || input.includes('yes') || input.includes('correct') || input.includes('right')) {
       // User confirmed the answer
       const confirmed = this.bookingSessionService.confirmAnswer(callSid);
       if (confirmed) {
         this.logger.log(`✅ [BOOKING] Answer confirmed for Q${session.lastQuestionNo} in call: ${callSid}`);
-        
+
         // Check if this was the last question
         if (session.currentQuestionNo >= this.bookingQuestions.length) {
           this.logger.log(`🏁 [BOOKING] Last question completed, proceeding to booking completion`);
@@ -167,7 +180,7 @@ export class BookingFlowService {
       // User rejected the answer
       this.bookingSessionService.rejectAnswer(callSid);
       this.logger.log(`❌ [BOOKING] Answer rejected for Q${session.lastQuestionNo} in call: ${callSid}`);
-      
+
       const currentQuestion = this.getQuestion(session.currentQuestionNo);
       if (currentQuestion) {
         return `No problem! Let me ask that question again. ${this.getQuestionPrompt(currentQuestion)}`;
@@ -183,7 +196,7 @@ export class BookingFlowService {
    */
   private generateConfirmationMessage(question: any, answer: string): string {
     const questionNo = question['questionNo.'];
-    
+
     switch (questionNo) {
       case 1: // Name
         return `I heard your name as "${answer}". Is this correct? Press 4 for yes, or press 5 for no.`;
@@ -231,14 +244,17 @@ export class BookingFlowService {
   private async processAnswerOptimized(userInput: string, question: any, session: BookingSession): Promise<string | null> {
     try {
       const questionNo = question['questionNo.'];
-      
+
       // Use smart extraction for email and mobile number questions
-      if (questionNo === 2) { // Email question
+      if (questionNo === 2) {
+        // Email question
         this.logger.log(`📧 [BOOKING] Using smart email extraction for: "${userInput}"`);
         const extractionResult = await this.bookingDataExtractionService.extractEmail(userInput);
-        
+
         if (extractionResult.success && extractionResult.extractedValue) {
-          this.logger.log(`✅ [BOOKING] Smart email extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`);
+          this.logger.log(
+            `✅ [BOOKING] Smart email extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`,
+          );
           return extractionResult.extractedValue;
         } else {
           this.logger.warn(`❌ [BOOKING] Smart email extraction failed, trying fallback methods`);
@@ -247,12 +263,15 @@ export class BookingFlowService {
             this.logger.debug(`📧 [EMAIL] Step ${index + 1}: ${step}`);
           });
         }
-      } else if (questionNo === 3) { // Mobile number question
+      } else if (questionNo === 3) {
+        // Mobile number question
         this.logger.log(`📱 [BOOKING] Using smart mobile extraction for: "${userInput}"`);
         const extractionResult = await this.bookingDataExtractionService.extractMobileNumber(userInput);
-        
+
         if (extractionResult.success && extractionResult.extractedValue) {
-          this.logger.log(`✅ [BOOKING] Smart mobile extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`);
+          this.logger.log(
+            `✅ [BOOKING] Smart mobile extraction successful: "${extractionResult.extractedValue}" (confidence: ${extractionResult.confidence})`,
+          );
           return extractionResult.extractedValue;
         } else {
           this.logger.warn(`❌ [BOOKING] Smart mobile extraction failed, trying fallback methods`);
@@ -863,5 +882,189 @@ export class BookingFlowService {
   clearBookingSession(callSid: string): void {
     this.bookingSessionService.clearBookingSession(callSid);
     this.logger.log(`🧹 [BOOKING] Cleared booking session for call: ${callSid}`);
+  }
+
+  /**
+   * Starts the letter-by-letter email collection process
+   */
+  private startEmailLetterByLetterCollection(callSid: string): string {
+    this.logger.log(`📧 [EMAIL] Starting letter-by-letter collection for call: ${callSid}`);
+    return `Now I'll collect your email address letter by letter to ensure accuracy. Please say the first letter of your email address. For example, if your email is john@gmail.com, start by saying the letter "j". I'll confirm each letter. Press 7 to correct the last letter, or press 8 when your email is complete.`;
+  }
+
+  /**
+   * Handles the letter-by-letter email collection flow
+   */
+  private handleEmailLetterByLetterFlow(callSid: string, userInput: string, session: BookingSession): string {
+    const input = userInput.toLowerCase().trim();
+
+    // Handle DTMF commands
+    if (input === '7') {
+      // Correct/remove last letter
+      this.bookingSessionService.correctLastEmailLetter(callSid);
+      const currentEmail = this.bookingSessionService.getCurrentEmail(callSid);
+      this.logger.log(`📧 [EMAIL] Corrected last letter, current email: "${currentEmail}"`);
+      return `Last letter removed. Current email: ${currentEmail || 'empty'}. Please say the correct letter.`;
+    }
+
+    if (input === '8') {
+      // Complete email collection
+      const completedEmail = this.bookingSessionService.completeEmailLetterByLetter(callSid);
+      if (completedEmail) {
+        // Validate the completed email
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (emailRegex.test(completedEmail)) {
+          // Set for confirmation using the regular flow
+          this.bookingSessionService.setAwaitingConfirmation(callSid, 2, completedEmail);
+          this.logger.log(`📧 [EMAIL] Completed valid email: "${completedEmail}"`);
+          return `Perfect! I heard your complete email as "${completedEmail}". Is this correct? Press 4 for yes, or press 5 for no.`;
+        } else {
+          // Invalid email format, restart collection
+          this.bookingSessionService.startEmailLetterByLetterMode(callSid);
+          this.logger.warn(`📧 [EMAIL] Invalid email format: "${completedEmail}", restarting`);
+          return `The email "${completedEmail}" doesn't seem complete or valid. Let's start over. Please say the first letter of your email address.`;
+        }
+      } else {
+        return `No email letters collected yet. Please say the first letter of your email address.`;
+      }
+    }
+
+    // Check if awaiting letter confirmation
+    if (this.bookingSessionService.isAwaitingLetterConfirmation(callSid)) {
+      if (input === '4' || input.includes('yes') || input.includes('correct')) {
+        // Confirm the letter
+        const lastLetter = session.lastSpokenLetter;
+        if (lastLetter) {
+          this.bookingSessionService.addEmailLetter(callSid, lastLetter);
+          const currentEmail = this.bookingSessionService.getCurrentEmail(callSid);
+          this.logger.log(`📧 [EMAIL] Confirmed letter "${lastLetter}", current email: "${currentEmail}"`);
+          return `Confirmed! Current email: ${currentEmail}. Say the next letter, or press 8 when complete.`;
+        }
+      } else if (input === '5' || input.includes('no') || input.includes('wrong')) {
+        // Reject the letter, ask for it again
+        this.logger.log(`📧 [EMAIL] Letter rejected, asking again`);
+        return `Please say that letter again clearly.`;
+      } else {
+        // Invalid confirmation response
+        return `Press 4 if "${session.lastSpokenLetter}" is correct, or press 5 to say it again.`;
+      }
+    }
+
+    // Process new letter input
+    const extractedLetter = this.extractEmailLetter(userInput);
+    if (extractedLetter) {
+      this.bookingSessionService.setAwaitingLetterConfirmation(callSid, extractedLetter);
+      this.logger.log(`📧 [EMAIL] Extracted letter: "${extractedLetter}", awaiting confirmation`);
+      return `I heard "${extractedLetter}". Is this correct? Press 4 for yes, or press 5 to say it again.`;
+    } else {
+      this.logger.warn(`📧 [EMAIL] Could not extract letter from: "${userInput}"`);
+      return `I didn't catch that letter clearly. Please say the next letter of your email address clearly.`;
+    }
+  }
+
+  /**
+   * Extracts a single letter/character from user input for email building
+   */
+  private extractEmailLetter(userInput: string): string | null {
+    const input = userInput.toLowerCase().trim();
+
+    // Handle common email symbols spoken as words
+    const emailSymbolMappings: { [key: string]: string } = {
+      at: '@',
+      dot: '.',
+      period: '.',
+      underscore: '_',
+      dash: '-',
+      hyphen: '-',
+      plus: '+',
+    };
+
+    // Check if it's a mapped symbol
+    if (emailSymbolMappings[input]) {
+      return emailSymbolMappings[input];
+    }
+
+    // Handle letter names (a, b, c, etc.)
+    const letterMappings: { [key: string]: string } = {
+      a: 'a',
+      bee: 'b',
+      b: 'b',
+      see: 'c',
+      c: 'c',
+      dee: 'd',
+      d: 'd',
+      e: 'e',
+      eff: 'f',
+      f: 'f',
+      gee: 'g',
+      g: 'g',
+      aitch: 'h',
+      h: 'h',
+      i: 'i',
+      jay: 'j',
+      j: 'j',
+      kay: 'k',
+      k: 'k',
+      ell: 'l',
+      l: 'l',
+      em: 'm',
+      m: 'm',
+      en: 'n',
+      n: 'n',
+      o: 'o',
+      pee: 'p',
+      p: 'p',
+      cue: 'q',
+      q: 'q',
+      ar: 'r',
+      r: 'r',
+      ess: 's',
+      s: 's',
+      tee: 't',
+      t: 't',
+      u: 'u',
+      vee: 'v',
+      v: 'v',
+      double: 'w',
+      w: 'w',
+      ex: 'x',
+      x: 'x',
+      why: 'y',
+      y: 'y',
+      zee: 'z',
+      zed: 'z',
+      z: 'z',
+    };
+
+    // Check if it's a letter name
+    if (letterMappings[input]) {
+      return letterMappings[input];
+    }
+
+    // For single character input, extract first alphanumeric character
+    const charMatch = input.match(/[a-zA-Z0-9]/);
+    if (charMatch) {
+      return charMatch[0].toLowerCase();
+    }
+
+    // Handle numbers spelled out
+    const numberWords: { [key: string]: string } = {
+      zero: '0',
+      one: '1',
+      two: '2',
+      three: '3',
+      four: '4',
+      five: '5',
+      six: '6',
+      seven: '7',
+      eight: '8',
+      nine: '9',
+    };
+
+    if (numberWords[input]) {
+      return numberWords[input];
+    }
+
+    return null;
   }
 }

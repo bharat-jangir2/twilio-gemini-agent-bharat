@@ -22,6 +22,12 @@ export interface BookingSession {
   awaitingConfirmation: boolean;
   lastAnswer?: string;
   lastQuestionNo?: number;
+  // Letter-by-letter email collection properties
+  emailLetterByLetterMode: boolean;
+  emailLetters: string[];
+  currentEmailLetterIndex: number;
+  awaitingLetterConfirmation: boolean;
+  lastSpokenLetter?: string;
 }
 
 @Injectable()
@@ -65,6 +71,12 @@ export class BookingSessionService {
       awaitingConfirmation: false,
       lastAnswer: undefined,
       lastQuestionNo: undefined,
+      // Initialize letter-by-letter email properties
+      emailLetterByLetterMode: false,
+      emailLetters: [],
+      currentEmailLetterIndex: 0,
+      awaitingLetterConfirmation: false,
+      lastSpokenLetter: undefined,
     };
 
     this.sessionCache.set(callSid, session);
@@ -261,14 +273,14 @@ export class BookingSessionService {
     if (session && session.awaitingConfirmation && session.lastAnswer && session.lastQuestionNo) {
       // Add the confirmed answer
       this.addAnswer(callSid, session.lastQuestionNo, '', session.lastAnswer);
-      
+
       // Reset confirmation state
       session.awaitingConfirmation = false;
       session.lastAnswer = undefined;
       session.lastQuestionNo = undefined;
       session.lastUpdated = new Date().toISOString();
       this.saveSession(session);
-      
+
       this.logger.log(`✅ [BOOKING] Confirmed answer for Q${session.lastQuestionNo} in call: ${callSid}`);
       return true;
     }
@@ -287,7 +299,7 @@ export class BookingSessionService {
       session.lastQuestionNo = undefined;
       session.lastUpdated = new Date().toISOString();
       this.saveSession(session);
-      
+
       this.logger.log(`❌ [BOOKING] Rejected answer for Q${session.lastQuestionNo} in call: ${callSid}`);
     }
   }
@@ -298,5 +310,115 @@ export class BookingSessionService {
   isAwaitingConfirmation(callSid: string): boolean {
     const session = this.getBookingSession(callSid);
     return session ? session.awaitingConfirmation : false;
+  }
+
+  /**
+   * Starts letter-by-letter email collection mode
+   */
+  startEmailLetterByLetterMode(callSid: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session) {
+      session.emailLetterByLetterMode = true;
+      session.emailLetters = [];
+      session.currentEmailLetterIndex = 0;
+      session.awaitingLetterConfirmation = false;
+      session.lastSpokenLetter = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📧 [EMAIL] Started letter-by-letter mode for call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Adds a letter to the email collection
+   */
+  addEmailLetter(callSid: string, letter: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session && session.emailLetterByLetterMode) {
+      session.emailLetters.push(letter);
+      session.currentEmailLetterIndex = session.emailLetters.length;
+      session.awaitingLetterConfirmation = false;
+      session.lastSpokenLetter = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📧 [EMAIL] Added letter "${letter}" to email collection for call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Sets awaiting letter confirmation
+   */
+  setAwaitingLetterConfirmation(callSid: string, letter: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session && session.emailLetterByLetterMode) {
+      session.awaitingLetterConfirmation = true;
+      session.lastSpokenLetter = letter;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📧 [EMAIL] Set awaiting letter confirmation for "${letter}" in call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Corrects the last letter in email collection
+   */
+  correctLastEmailLetter(callSid: string): void {
+    const session = this.getBookingSession(callSid);
+    if (session && session.emailLetterByLetterMode && session.emailLetters.length > 0) {
+      session.emailLetters.pop(); // Remove last letter
+      session.currentEmailLetterIndex = session.emailLetters.length;
+      session.awaitingLetterConfirmation = false;
+      session.lastSpokenLetter = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📧 [EMAIL] Removed last letter from email collection for call: ${callSid}`);
+    }
+  }
+
+  /**
+   * Completes email letter-by-letter collection
+   */
+  completeEmailLetterByLetter(callSid: string): string | null {
+    const session = this.getBookingSession(callSid);
+    if (session && session.emailLetterByLetterMode && session.emailLetters.length > 0) {
+      const email = session.emailLetters.join('');
+      session.emailLetterByLetterMode = false;
+      session.emailLetters = [];
+      session.currentEmailLetterIndex = 0;
+      session.awaitingLetterConfirmation = false;
+      session.lastSpokenLetter = undefined;
+      session.lastUpdated = new Date().toISOString();
+      this.saveSession(session);
+      this.logger.log(`📧 [EMAIL] Completed letter-by-letter collection: "${email}" for call: ${callSid}`);
+      return email;
+    }
+    return null;
+  }
+
+  /**
+   * Gets current email being built
+   */
+  getCurrentEmail(callSid: string): string {
+    const session = this.getBookingSession(callSid);
+    if (session && session.emailLetterByLetterMode) {
+      return session.emailLetters.join('');
+    }
+    return '';
+  }
+
+  /**
+   * Checks if session is in email letter-by-letter mode
+   */
+  isInEmailLetterByLetterMode(callSid: string): boolean {
+    const session = this.getBookingSession(callSid);
+    return session ? session.emailLetterByLetterMode : false;
+  }
+
+  /**
+   * Checks if session is awaiting letter confirmation
+   */
+  isAwaitingLetterConfirmation(callSid: string): boolean {
+    const session = this.getBookingSession(callSid);
+    return session ? session.awaitingLetterConfirmation : false;
   }
 }
