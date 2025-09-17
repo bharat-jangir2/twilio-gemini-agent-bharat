@@ -148,3 +148,31 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 -> error → on errors.
 
 -> message → raw data from Twilio (which is what you’re parsing).
+
+## booking flow
+
+🔄 Flow Summary (Step by Step)
+
+handleBookingResponse(...)
+
+↳ startBookingFlow(...)
+
+↳ askNextBookingQuestion(...)
+
+or ↳ processBookingQuestion(...)
+
+↳ extractAnswerFromTranscription(...)
+
+↳ extractName | extractAge | extractGender | extractEmail | extractService | extractDate | extractTime
+
+↳ askNextBookingQuestion(...)
+
+or ↳ handlePostBookingConfirmation(...)
+
+↳ confirm via bookingSessionService.confirmBooking(...)
+
+End of questions → finalizeBooking(...)
+
+↳ emailService.sendBookingConfirmationEmail(...)
+
+↳ bookingSessionService.markBookingComplete(...)

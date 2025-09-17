@@ -164,15 +164,22 @@ export class BookingFlowService {
 
         // Move to next question
         this.bookingSessionService.moveToNextQuestion(callSid);
-        const nextQuestion = this.getQuestion(session.currentQuestionNo);
+        const updatedSession = this.bookingSessionService.getBookingSession(callSid);
+
+        if (!updatedSession) {
+          this.logger.error(`❌ [BOOKING] Session not found after moving to next question: ${callSid}`);
+          return "I'm sorry, there was an error with the booking process. Please try again.";
+        }
+
+        const nextQuestion = this.getQuestion(updatedSession.currentQuestionNo);
 
         if (!nextQuestion) {
-          this.logger.error(`❌ [BOOKING] No question found for number: ${session.currentQuestionNo}`);
+          this.logger.error(`❌ [BOOKING] No question found for number: ${updatedSession.currentQuestionNo}`);
           return await this.completeBooking(callSid);
         }
 
         // Log question progression
-        this.logQuestionProgression(session, nextQuestion);
+        this.logQuestionProgression(updatedSession, nextQuestion);
 
         return `Perfect! Thank you. Now, ${this.getQuestionPrompt(nextQuestion)}`;
       }
@@ -682,7 +689,10 @@ export class BookingFlowService {
 
     this.logger.log(`✅ [BOOKING] Completed booking ${bookingRef} for call: ${callSid}`);
 
-    return `Excellent! Your booking has been confirmed. Your booking reference is ${bookingRef}. You'll receive a confirmation email shortly with all the details. Is there anything else I can help you with?`;
+    // Generate user-facing booking summary
+    const userSummary = this.generateUserBookingSummary(session, bookingRef);
+
+    return userSummary;
   }
 
   /**
@@ -807,6 +817,26 @@ export class BookingFlowService {
   }
 
   /**
+   * Generates user-facing booking summary
+   */
+  private generateUserBookingSummary(session: BookingSession, bookingRef: string): string {
+    const answers = session.answers;
+    const name = answers.find((a) => a.questionNo === 1)?.answer || 'N/A';
+    const email = answers.find((a) => a.questionNo === 2)?.answer || 'N/A';
+    const phone = answers.find((a) => a.questionNo === 3)?.answer || 'N/A';
+
+    return `Excellent! Your booking has been confirmed. Here's your booking summary:
+
+    Booking Reference: ${bookingRef}
+    Name: ${name}
+    Email: ${email}
+    Phone: ${phone}
+    Booking Date: ${new Date().toLocaleDateString()}
+
+    You'll receive a confirmation email shortly at ${email} with all the details. Is there anything else I can help you with?`;
+  }
+
+  /**
    * Generates HTML email content for booking confirmation
    */
   private generateBookingEmailContent(bookingData: any, bookingRef: string): string {
@@ -908,7 +938,17 @@ export class BookingFlowService {
     }
 
     if (input === '8') {
-      // Complete email collection
+      // Complete email collection - but only if we have letters collected
+      const currentEmail = this.bookingSessionService.getCurrentEmail(callSid);
+      if (!currentEmail || currentEmail.length === 0) {
+        return `No email letters collected yet. Please say the first letter of your email address.`;
+      }
+
+      // Prevent multiple pressing of 8 when already completed
+      if (!this.bookingSessionService.isInEmailLetterByLetterMode(callSid)) {
+        return `Email collection is already completed. Please continue with the current question.`;
+      }
+
       const completedEmail = this.bookingSessionService.completeEmailLetterByLetter(callSid);
       if (completedEmail) {
         // Validate the completed email
@@ -1006,6 +1046,7 @@ export class BookingFlowService {
       kay: 'k',
       k: 'k',
       ell: 'l',
+      al: 'l',
       l: 'l',
       em: 'm',
       m: 'm',
